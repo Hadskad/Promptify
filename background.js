@@ -1,113 +1,137 @@
 // background.js
 
-// Create context menu on install
+// --- PROMPTIFY SYSTEM PROMPT ---
+const PROMPTIFY_SYSTEM_PROMPT = `
+You are Promptify — an elite AI prompt engineer who transforms vague, weak, or incomplete ideas into powerful, optimized prompts designed to extract the best possible answers from advanced AI models like ChatGPT, Gemini, and Claude.
+
+Your goal is to make the rewritten prompt:
+- Far clearer and more detailed than the original.
+- Structured with context, role, and task.
+- Optimized for creativity, relevance, and precision.
+- Adapted to the true intent behind the raw idea of the user.
+
+Rules:
+1. Never answer the question of the user.
+2. Never remove their intent — enhance it.
+3. Use formatting (like lists, roles, or examples) if it helps.
+4. Output only the final rewritten prompt — no explanations.
+`;
+
+// --- FALLBACK MOCK (for when Gemini Nano is unavailable) ---
+const mockAI = {
+  languageModel: {
+    async capabilities() {
+      return { available: "mock" };
+    },
+    async create() {
+      return {
+        prompt: async (text) => {
+          await new Promise((r) => setTimeout(r, 500));
+          return `✨ [Mock Refinement]\n\n${text}\n\n🧠 This prompt has been enhanced by Promptify (using fallback mode - Gemini Nano not available in your region yet).`;
+        }
+      };
+    }
+  }
+};
+
+// --- CHECK IF GEMINI NANO IS AVAILABLE (handles all possible API locations) ---
+async function getAISession() {
+  try {
+    // Try different possible APIs (self.ai for service workers, window.ai for other contexts, or global ai)
+    const aiAPI = (typeof self !== 'undefined' && self.ai) || 
+                  (typeof ai !== 'undefined' && ai) ||
+                  (typeof window !== 'undefined' && window.ai);
+    
+    if (aiAPI && aiAPI.languageModel) {
+      console.log("✅ Found AI API");
+      const caps = await aiAPI.languageModel.capabilities();
+      
+      if (caps.available === "readily") {
+        console.log("✅ Promptify: Using Gemini Nano");
+        return await aiAPI.languageModel.create({ 
+          systemPrompt: PROMPTIFY_SYSTEM_PROMPT 
+        });
+      } else if (caps.available === "after-download") {
+        console.log("⏳ Promptify: Gemini Nano needs download, using fallback");
+        return await mockAI.languageModel.create();
+      }
+    }
+  } catch (err) {
+    console.warn("Promptify: Gemini Nano not available, using fallback", err);
+  }
+  
+  // Fallback to mock
+  console.log("🔄 Promptify: Using mock AI (Gemini Nano unavailable)");
+  return await mockAI.languageModel.create();
+}
+
+// --- INSTALL CONTEXT MENU ---
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "promptify-refine",
     title: "Refine with Promptify",
     contexts: ["selection"]
   });
+  console.log("✅ Promptify: Context menu installed");
 });
 
-// In background.js (append)
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg && msg.type === "PROMPTIFY_REFINED") {
-    const refined = msg.refined;
-    chrome.storage.local.set({ lastRefined: refined }, () => {
-      console.log("Promptify: saved lastRefined");
-    });
-  }
-});
-
-// Handle clicks on the context menu
+// --- HANDLE CONTEXT MENU CLICK ---
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== "promptify-refine" || !info.selectionText) return;
 
   try {
-    // Execute the refine function inside the page context
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (selectedText) => {
-        // This function runs in page context
-        // Provide a small mock if ai is not present (dev fallback)
-        if (typeof ai === "undefined") {
-          globalThis.ai = {
-            languageModel: {
-              async capabilities() {
-                return { available: "mock" };
-              },
-              async create() {
-                return {
-                  prompt: async (s) => {
-                    await new Promise((r) => setTimeout(r, 300));
-                    return `✨ [Mocked Rewrite]\n\n${s}\n\n🧠 Refined by Promptify.`;
-                  }
-                };
-              }
-            }
-          };
-        }
+    // Get AI session (Gemini Nano or fallback)
+    const session = await getAISession();
+    
+    // Refine the prompt
+    const refined = await session.prompt(
+      `Now, transform this text:\n\n${info.selectionText}`
+    );
 
-        // Actual in-page refinement
-        (async () => {
-          try {
-            const session = await ai.languageModel.create({
-              systemPrompt:
-                "You are Promptify. Rewrite the given text for clarity and creativity."
-            });
-            const refined = await session.prompt(
-              `Rewrite this text for clarity and creativity:\n\n${selectedText}`
-            );
+    // Store the result
+    await chrome.storage.local.set({ lastRefined: refined });
+    console.log("✅ Promptify: Refined and saved");
 
-            // Replace the selection on the page
-            const sel = window.getSelection();
-            if (sel && sel.rangeCount > 0) {
-              const range = sel.getRangeAt(0);
-              range.deleteContents();
-              range.insertNode(document.createTextNode(refined));
-            }
-
-            // Try copying to clipboard (best-effort)
-            try {
-              navigator.clipboard.writeText(refined).catch(() => {});
-            } catch (e) {}
-
-            // Send refined text back to extension background via custom event
-            window.dispatchEvent(
-              new CustomEvent("promptify_refined", { detail: { refined } })
-            );
-
-            // Optional small UI feedback
-            alert("✅ Refined by Promptify (also copied to clipboard).");
-          } catch (err) {
-            console.error("Promptify (in-page) error:", err);
-            alert("Promptify failed to refine the selection. See console.");
-          }
-        })();
-      },
-      args: [info.selectionText]
+    // Send refined text to content script to replace selection
+    await chrome.tabs.sendMessage(tab.id, {
+      type: "REPLACE_SELECTION",
+      refined: refined,
+      original: info.selectionText
     });
 
-    // Listen for the event from the page and store last refined
-    // (we can't attach a persistent listener here in background for each page event,
-    //  so we also inject a short helper that posts a message to the extension)
-    // Instead we also inject a tiny helper to forward the custom event to the extension runtime:
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        if (!window.__promptifyForwarderAdded) {
-          window.__promptifyForwarderAdded = true;
-          window.addEventListener("promptify_refined", (ev) => {
-            // Post to extension - this becomes visible to runtime.onMessage in background if set
-            window.postMessage({ type: "PROMPTIFY_REFINED", refined: ev.detail.refined }, "*");
-          });
-        }
-      }
-    });
-
-    // Setup a one-time listener in the background to receive the page postMessage via runtime.onMessage
-    // (Note: content scripts receive window.postMessage; background can't directly. We'll add a short content script listener below.)
   } catch (err) {
-    console.error("Promptify background error:", err);
+    console.error("❌ Promptify background error:", err);
+    
+    // Try to notify user via content script
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: "SHOW_ERROR",
+        error: "Failed to refine prompt. Please try again."
+      });
+    } catch (e) {
+      console.error("Could not send error message to tab");
+    }
+  }
+});
+
+// --- LISTEN FOR MESSAGES FROM POPUP OR CONTENT SCRIPT ---
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Handle refinement requests from popup
+  if (msg.type === "REFINE_PROMPT") {
+    (async () => {
+      try {
+        const session = await getAISession();
+        const refined = await session.prompt(
+          `Now, transform this text:\n\n${msg.text}`
+        );
+        
+        await chrome.storage.local.set({ lastRefined: refined });
+        sendResponse({ success: true, refined });
+      } catch (err) {
+        console.error("Refinement error:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true; // Keep channel open for async response
   }
 });
