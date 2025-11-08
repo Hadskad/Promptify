@@ -17,7 +17,7 @@ Installation Instructions (For Judges)
 
 Clone the repository
 
-git clone https://github.com/YOUR_USERNAME/Promptify.git
+git clone https://github.com/Hadskad/Promptify.git
 Open Chrome → Extensions → Manage Extensions
 Open Chrome -> Extensions -> Manage extensions
 
