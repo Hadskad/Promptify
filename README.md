@@ -8,25 +8,21 @@ Rewrites prompts for clarity, specificity, and effectiveness.
 Works directly in the browser with Gemini Nano (on-device AI).
 Fast, private, and lightweight.
 Perfect for writers, coders, students, and AI power users.
-Tech Stack
 
+Tech Stack:
 HTML, CSS, JavaScript
 Chrome Extension APIs
 Gemini Nano (Prompt API)
-Installation Instructions (For Judges)
 
-Clone the repository
 
+Installation Instructions (For Judges):
+
+1. Clone the repository:
 git clone https://github.com/Hadskad/Promptify.git
-Open Chrome → Extensions → Manage Extensions
-Open Chrome -> Extensions -> Manage extensions
-
-Enable Developer Mode (top-right corner)
-
-Click “Load unpacked” and select the Promptify folder.
-
+2. Open Chrome → Extensions → Manage Extensions
+3. Enable Developer Mode (top-right corner)
+4. Click “Load unpacked” and select the Promptify folder.
 The extension should now appear in your toolbar
-
-Click the Promptify icon, enter a raw prompt, and see it rewritten instantly.
+5. Click the Promptify icon, enter a raw prompt, and see it rewritten instantly.
 
 Note: If Gemini Nano (Prompt API) is not yet available in your region, the app will show a placeholder message. Once available, it automatically connects — no extra setup needed.
